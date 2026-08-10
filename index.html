@@ -395,7 +395,7 @@
   <!-- ============ HISTORIQUE ============ -->
   <section id="historique">
     <h1 class="page-title">Historique</h1>
-    <p class="page-sub">Évolution des primes mois par mois — année 2026</p>
+    <p class="page-sub">Évolution des primes mois par mois</p>
 
     <div class="kpi-grid" id="histo-kpis"></div>
 
@@ -569,18 +569,57 @@
 <div class="save-indicator" id="save-indicator">Enregistré</div>
 
 <script>
-const MONTHS = ["Janvier 26","Février 26","Mars 26","Avril 26","Mai 26","Juin 26","Juillet 26","Août 26","Septembre 26","Octobre 26","Novembre 26","Décembre 26"];
-const MONTH_LABELS = {
-  "Janvier 26":"Janvier 2026","Février 26":"Février 2026","Mars 26":"Mars 2026","Avril 26":"Avril 2026",
-  "Mai 26":"Mai 2026","Juin 26":"Juin 2026","Juillet 26":"Juillet 2026","Août 26":"Août 2026",
-  "Septembre 26":"Septembre 2026","Octobre 26":"Octobre 2026","Novembre 26":"Novembre 2026","Décembre 26":"Décembre 2026"
-};
-const MONTH_SHORT = {
-  "Janvier 26":"Janv.","Février 26":"Févr.","Mars 26":"Mars","Avril 26":"Avr.","Mai 26":"Mai","Juin 26":"Juin",
-  "Juillet 26":"Juil.","Août 26":"Août","Septembre 26":"Sept.","Octobre 26":"Oct.","Novembre 26":"Nov.","Décembre 26":"Déc."
-};
+/* ---------- Mois : plage calculée dynamiquement à partir des données chargées ----------
+   Contrairement à l'ancienne version (12 mois fixes de 2026), la plage s'adapte à ce qui
+   est réellement présent dans state.sales (ex : import d'un historique multi-années),
+   étendue jusqu'à décembre de l'année en cours pour laisser des mois futurs disponibles. */
+const MONTHS_FR_FULL = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
+const MONTHS_FR_SHORT = ['Janv.','Févr.','Mars','Avr.','Mai','Juin','Juil.','Août','Sept.','Oct.','Nov.','Déc.'];
+let MONTHS = [];
+let MONTH_LABELS = {};
+let MONTH_SHORT = {};
+let MONTH_INFO = {};
 
-const SEED = {"settings":{"primeCat1":40,"primeCat2":80,"salaireBase":2000,"indemnites":0,"cotFallback":0.22,"pasFallback":0.1,"retenuesFallback":0,"tauxImposition":9.9},"payslips":[],"sales":{"Janvier 26":[],"Février 26":[],"Mars 26":[],"Avril 26":[],"Mai 26":[],"Juin 26":[],"Juillet 26":[],"Août 26":[],"Septembre 26":[],"Octobre 26":[],"Novembre 26":[],"Décembre 26":[]}};
+function parseMonthKey(key) {
+  const parts = key.split(' ');
+  const year = parseInt(parts[parts.length - 1], 10);
+  const name = parts.slice(0, -1).join(' ');
+  const idx = MONTHS_FR_FULL.indexOf(name);
+  if (idx < 0 || isNaN(year)) return null;
+  return { year, monthIdx0: idx };
+}
+
+function rebuildMonths() {
+  const now = new Date();
+  let minVal = now.getFullYear() * 12 + now.getMonth();
+  let maxYear = now.getFullYear();
+  Object.keys(state.sales || {}).forEach(key => {
+    const ym = parseMonthKey(key);
+    if (!ym) return;
+    const val = ym.year * 12 + ym.monthIdx0;
+    if (val < minVal) minVal = val;
+    if (ym.year > maxYear) maxYear = ym.year;
+  });
+  const startYear = Math.floor(minVal / 12), startMonth0 = minVal % 12;
+
+  MONTHS.length = 0;
+  Object.keys(MONTH_LABELS).forEach(k => delete MONTH_LABELS[k]);
+  Object.keys(MONTH_SHORT).forEach(k => delete MONTH_SHORT[k]);
+  Object.keys(MONTH_INFO).forEach(k => delete MONTH_INFO[k]);
+
+  let y = startYear, m = startMonth0;
+  while (y < maxYear || (y === maxYear && m <= 11)) {
+    const key = MONTHS_FR_FULL[m] + ' ' + y;
+    MONTHS.push(key);
+    MONTH_LABELS[key] = key;
+    MONTH_SHORT[key] = MONTHS_FR_SHORT[m] + ' ' + String(y).slice(2);
+    MONTH_INFO[key] = { year: y, monthIdx0: m };
+    m++;
+    if (m > 11) { m = 0; y++; }
+  }
+}
+
+const SEED = {"settings":{"primeCat1":40,"primeCat2":80,"salaireBase":2000,"indemnites":0,"cotFallback":0.22,"pasFallback":0.1,"retenuesFallback":0,"tauxImposition":9.9},"payslips":[],"sales":{}};
 
 /* ---------- File System Access API storage ---------- */
 let dirHandle = null;
@@ -664,19 +703,25 @@ async function requestPermission(handle) {
 async function loadData() {
   const raw = await readDataFile();
   if (raw) {
-    try { state = JSON.parse(raw); return; } catch (e) { /* seed */ }
+    try { state = JSON.parse(raw); rebuildMonths(); currentMonth = currentCalendarMonthKey(); return; } catch (e) { /* seed */ }
   }
   state = structuredClone(SEED);
+  rebuildMonths();
+  currentMonth = currentCalendarMonthKey();
 }
 
 let state = structuredClone(SEED);
+rebuildMonths();
 let currentMonth = currentCalendarMonthKey();
 
 function currentCalendarMonthKey() {
   const now = new Date();
-  if (now.getFullYear() < 2026) return MONTHS[0];
-  if (now.getFullYear() > 2026) return MONTHS[11];
-  return MONTHS[now.getMonth()];
+  const key = MONTHS_FR_FULL[now.getMonth()] + ' ' + now.getFullYear();
+  if (MONTH_INFO[key]) return key;
+  const nowVal = now.getFullYear() * 12 + now.getMonth();
+  const firstVal = MONTH_INFO[MONTHS[0]].year * 12 + MONTH_INFO[MONTHS[0]].monthIdx0;
+  if (nowVal < firstVal) return MONTHS[0];
+  return MONTHS[MONTHS.length - 1];
 }
 
 function euro(n) {
@@ -862,8 +907,8 @@ function renderDashboard() {
   }
 
   // Projection fin de mois (extrapolation linéaire) — un mois déjà terminé est projeté à l'identique
-  const monthIndex = MONTHS.indexOf(monthKey);
-  const daysInMonth = new Date(2026, monthIndex + 1, 0).getDate();
+  const mi = MONTH_INFO[monthKey];
+  const daysInMonth = new Date(mi.year, mi.monthIdx0 + 1, 0).getDate();
   const daysElapsed = isRealCurrentMonth ? Math.max(1, now.getDate()) : daysInMonth;
   const projPrimes = m.totalPrime / daysElapsed * daysInMonth;
   const projSal = computeSalary(projPrimes);
@@ -967,7 +1012,7 @@ function buildBarChartHtml(rows, maxHeight, opts) {
     return '<div class="' + classes.join(' ') + '"' + onclick + '>' +
       '<div class="bar-value">' + euro(r.c.totalPrime) + '</div>' +
       '<div class="bar" style="height:' + h + 'px"></div>' +
-      '<div class="bar-label">' + MONTH_SHORT[r.mk] + ' 26</div>' +
+      '<div class="bar-label">' + MONTH_SHORT[r.mk] + '</div>' +
       '</div>';
   }).join('');
 }
@@ -981,8 +1026,8 @@ function renderHistorique() {
   });
 
   document.getElementById('histo-kpis').innerHTML =
-    '<div class="kpi"><div class="label">Nombre total de ventes</div><div class="value">' + totalV + '</div><div class="detail">Année 2026</div></div>' +
-    '<div class="kpi orange"><div class="label">Total primes</div><div class="value">' + euro(totalPrime) + '</div><div class="detail">Cumul annuel</div></div>' +
+    '<div class="kpi"><div class="label">Nombre total de ventes</div><div class="value">' + totalV + '</div><div class="detail">Depuis ' + (MONTHS.length ? MONTH_LABELS[MONTHS[0]] : '') + '</div></div>' +
+    '<div class="kpi orange"><div class="label">Total primes</div><div class="value">' + euro(totalPrime) + '</div><div class="detail">Cumul complet</div></div>' +
     '<div class="kpi"><div class="label">Ventes CAT 1</div><div class="value">' + total1 + '</div><div class="detail">' + (totalV ? pct(total1/totalV) : '—') + ' des ventes</div></div>' +
     '<div class="kpi"><div class="label">Ventes CAT 2</div><div class="value">' + total2 + '</div><div class="detail">' + (totalV ? pct(total2/totalV) : '—') + ' des ventes</div></div>';
 
@@ -1144,9 +1189,15 @@ function parsePayslip(rawText) {
   const mm = T.match(/bulletin de paie de ([a-zà-ÿ]+) (\d{4})/i);
   if (mm) {
     const mn = mm[1].toLowerCase();
-    ficheMonth = mn.charAt(0).toUpperCase() + mn.slice(1) + ' ' + mm[2];
-    const idx = MONTHS_FR.indexOf(mn);
-    if (idx > 0) onglet = MONTHS[idx - 1]; // le mois de ventes correspondant = mois précédent
+    const yr = parseInt(mm[2], 10);
+    ficheMonth = mn.charAt(0).toUpperCase() + mn.slice(1) + ' ' + yr;
+    const idx = MONTHS_FR.indexOf(mn); // 0-11
+    if (idx >= 0) {
+      let prevIdx = idx - 1, prevYr = yr;
+      if (prevIdx < 0) { prevIdx = 11; prevYr = yr - 1; }
+      const key = MONTHS_FR_FULL[prevIdx] + ' ' + prevYr; // le mois de ventes correspondant = mois précédent
+      if (MONTH_INFO[key]) onglet = key;
+    }
   }
 
   return {
@@ -1269,6 +1320,8 @@ document.getElementById('file-import').addEventListener('change', e => {
       const imported = JSON.parse(reader.result);
       if (!imported.settings || !imported.sales) throw new Error('format invalide');
       state = imported;
+      rebuildMonths();
+      currentMonth = currentCalendarMonthKey();
       persist();
       renderAll();
       alert('Import réussi.');
@@ -1280,8 +1333,10 @@ document.getElementById('file-import').addEventListener('change', e => {
   e.target.value = '';
 });
 document.getElementById('btn-reset').addEventListener('click', () => {
-  if (confirm("Réinitialiser toutes les données aux valeurs d'origine (issues du fichier Excel) ? Cette action efface tes ajouts.")) {
+  if (confirm("Réinitialiser toutes les données (ventes, fiches de paie, réglages) ? Cette action efface tout.")) {
     state = structuredClone(SEED);
+    rebuildMonths();
+    currentMonth = currentCalendarMonthKey();
     persist();
     renderAll();
   }
