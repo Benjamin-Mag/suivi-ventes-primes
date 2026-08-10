@@ -582,10 +582,12 @@ let MONTH_INFO = {};
 
 function parseMonthKey(key) {
   const parts = key.split(' ');
-  const year = parseInt(parts[parts.length - 1], 10);
+  let year = parseInt(parts[parts.length - 1], 10);
   const name = parts.slice(0, -1).join(' ');
   const idx = MONTHS_FR_FULL.indexOf(name);
   if (idx < 0 || isNaN(year)) return null;
+  if (year < 100) year += 2000; // ancien format à année courte ("Janvier 26" = 2026)
+  if (year < 1000 || year > 3000) return null; // garde-fou contre une clé mal formée
   return { year, monthIdx0: idx };
 }
 
@@ -594,6 +596,21 @@ function rebuildMonths() {
   const nowVal = now.getFullYear() * 12 + now.getMonth();
   let minVal = nowVal;
   let maxVal = nowVal; // jamais de mois futur au-delà du mois réel en cours, sauf si des données existent déjà au-delà
+
+  // normalise les clés au format court ("Janvier 26") vers le format complet ("Janvier 2026"),
+  // pour rester compatible avec des données exportées depuis l'ancienne version de l'app
+  Object.keys(state.sales || {}).forEach(key => {
+    const parts = key.split(' ');
+    const rawYear = parseInt(parts[parts.length - 1], 10);
+    if (isNaN(rawYear) || rawYear >= 100) return;
+    const name = parts.slice(0, -1).join(' ');
+    const idx = MONTHS_FR_FULL.indexOf(name);
+    if (idx < 0) return;
+    const canonicalKey = name + ' ' + (rawYear + 2000);
+    state.sales[canonicalKey] = (state.sales[canonicalKey] || []).concat(state.sales[key]);
+    delete state.sales[key];
+  });
+
   Object.keys(state.sales || {}).forEach(key => {
     const ym = parseMonthKey(key);
     if (!ym) return;
