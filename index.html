@@ -591,16 +591,18 @@ function parseMonthKey(key) {
 
 function rebuildMonths() {
   const now = new Date();
-  let minVal = now.getFullYear() * 12 + now.getMonth();
-  let maxYear = now.getFullYear();
+  const nowVal = now.getFullYear() * 12 + now.getMonth();
+  let minVal = nowVal;
+  let maxVal = nowVal; // jamais de mois futur au-delà du mois réel en cours, sauf si des données existent déjà au-delà
   Object.keys(state.sales || {}).forEach(key => {
     const ym = parseMonthKey(key);
     if (!ym) return;
     const val = ym.year * 12 + ym.monthIdx0;
     if (val < minVal) minVal = val;
-    if (ym.year > maxYear) maxYear = ym.year;
+    if (val > maxVal) maxVal = val;
   });
   const startYear = Math.floor(minVal / 12), startMonth0 = minVal % 12;
+  const endYear = Math.floor(maxVal / 12), endMonth0 = maxVal % 12;
 
   MONTHS.length = 0;
   Object.keys(MONTH_LABELS).forEach(k => delete MONTH_LABELS[k]);
@@ -608,7 +610,7 @@ function rebuildMonths() {
   Object.keys(MONTH_INFO).forEach(k => delete MONTH_INFO[k]);
 
   let y = startYear, m = startMonth0;
-  while (y < maxYear || (y === maxYear && m <= 11)) {
+  while (y < endYear || (y === endYear && m <= endMonth0)) {
     const key = MONTHS_FR_FULL[m] + ' ' + y;
     MONTHS.push(key);
     MONTH_LABELS[key] = key;
