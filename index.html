@@ -947,12 +947,14 @@ function renderDashboard() {
 // (pas de dépendance à un addEventListener re-posé ou à la propagation d'un événement).
 function selectDashMonth(mk) {
   currentMonth = mk;
-  renderAll();
+  renderDashboard();
+  renderVentes();
 }
 function backToCurrentDashMonth(e) {
   if (e) e.preventDefault();
   currentMonth = currentCalendarMonthKey();
-  renderAll();
+  renderDashboard();
+  renderVentes();
 }
 
 /* ---------- VENTES ---------- */
@@ -964,7 +966,7 @@ function renderMonthStrip() {
     const n = (state.sales[mk] || []).length;
     b.innerHTML = MONTH_SHORT[mk] + (n ? '<span class="count">(' + n + ')</span>' : '');
     if (mk === currentMonth) b.classList.add('active');
-    b.addEventListener('click', () => { currentMonth = mk; renderAll(); });
+    b.addEventListener('click', () => { currentMonth = mk; renderDashboard(); renderVentes(); });
     strip.appendChild(b);
   });
 }
