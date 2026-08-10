@@ -301,6 +301,20 @@
 </head>
 <body>
 
+<div id="setupScreen" style="display:none;position:fixed;inset:0;z-index:100;background:var(--bg);align-items:center;justify-content:center;padding:24px;">
+  <div class="card" style="max-width:440px;">
+    <h2>Bienvenue 👋</h2>
+    <p class="hint">Choisis un dossier sur ton ordinateur : tes ventes et fiches de paie y seront enregistrées automatiquement dans un fichier <strong>data.json</strong>, que tu peux synchroniser (OneDrive, Drive...) ou sauvegarder toi-même.</p>
+    <button class="btn btn-primary" id="pickFolderBtn" style="width:100%;">Choisir un dossier &amp; commencer →</button>
+  </div>
+</div>
+
+<div id="permBanner" style="display:none;position:fixed;top:0;left:0;right:0;z-index:100;background:var(--accent);color:var(--accent-contrast);padding:12px 20px;align-items:center;justify-content:space-between;gap:12px;">
+  <span>📂 Clique pour réautoriser l'accès à ton dossier de données.</span>
+  <button class="btn btn-secondary" id="reAuthBtn" style="white-space:nowrap;">Autoriser</button>
+</div>
+
+<div id="app" style="display:none;">
 <nav class="topbar">
   <div class="logo">Ventes &amp; Primes</div>
   <div class="links">
@@ -528,7 +542,16 @@
 
     <div class="card">
       <h2>Sauvegarde</h2>
-      <p class="hint">Les données sont stockées dans ce navigateur (localStorage). Exporte régulièrement une sauvegarde JSON pour éviter toute perte (changement de navigateur, nettoyage du cache, etc.).</p>
+      <p class="hint">Les données sont enregistrées automatiquement dans le fichier <strong>data.json</strong> de ton dossier choisi. Tu peux aussi exporter une copie JSON de temps en temps en plus.</p>
+      <div class="form-grid" style="margin-bottom:16px;">
+        <div class="field">
+          <label>Dossier de sauvegarde</label>
+          <div style="display:flex;align-items:center;gap:10px;">
+            <span id="folder-name" style="font-size:13px;color:var(--text-secondary);">—</span>
+            <button class="btn btn-secondary" id="btn-change-folder" type="button">Changer…</button>
+          </div>
+        </div>
+      </div>
       <div class="toolbar">
         <button class="btn btn-primary" id="btn-export">Exporter maintenant</button>
         <button class="btn btn-secondary" id="btn-import">Importer une sauvegarde</button>
@@ -538,9 +561,10 @@
     </div>
   </section>
 
-  <div class="page-footer">Données stockées localement dans ce navigateur. Pense à exporter une sauvegarde régulièrement (Réglages).</div>
+  <div class="page-footer">Données enregistrées automatiquement dans ton dossier choisi (data.json).</div>
 
 </main>
+</div>
 
 <div class="save-indicator" id="save-indicator">Enregistré</div>
 
@@ -558,17 +582,94 @@ const MONTH_SHORT = {
 
 const SEED = {"settings":{"primeCat1":40,"primeCat2":80,"salaireBase":2000,"indemnites":0,"cotFallback":0.22,"pasFallback":0.1,"retenuesFallback":0,"tauxImposition":9.9},"payslips":[],"sales":{"Janvier 26":[],"Février 26":[],"Mars 26":[],"Avril 26":[],"Mai 26":[],"Juin 26":[],"Juillet 26":[],"Août 26":[],"Septembre 26":[],"Octobre 26":[],"Novembre 26":[],"Décembre 26":[]}};
 
-const STORAGE_KEY = "suiviVentesPrimes_v1";
+/* ---------- File System Access API storage ---------- */
+let dirHandle = null;
+const DATA_FILE = 'data.json';
+const IDB_NAME = 'suivi-ventes-primes-db';
+const IDB_STORE = 'handles';
 
-function loadState() {
-  const raw = localStorage.getItem(STORAGE_KEY);
-  if (raw) {
-    try { return JSON.parse(raw); } catch (e) { /* seed */ }
-  }
-  return structuredClone(SEED);
+function openIDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(IDB_NAME, 1);
+    req.onupgradeneeded = e => e.target.result.createObjectStore(IDB_STORE);
+    req.onsuccess = e => resolve(e.target.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+async function saveHandleToIDB(handle) {
+  const db = await openIDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE, 'readwrite');
+    tx.objectStore(IDB_STORE).put(handle, 'dir');
+    tx.oncomplete = resolve;
+    tx.onerror = () => reject(tx.error);
+  });
+}
+async function getHandleFromIDB() {
+  const db = await openIDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE, 'readonly');
+    const req = tx.objectStore(IDB_STORE).get('dir');
+    req.onsuccess = () => resolve(req.result || null);
+    req.onerror = () => reject(req.error);
+  });
+}
+async function clearHandleFromIDB() {
+  const db = await openIDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE, 'readwrite');
+    tx.objectStore(IDB_STORE).delete('dir');
+    tx.oncomplete = resolve;
+    tx.onerror = () => reject(tx.error);
+  });
 }
 
-let state = loadState();
+async function readDataFile() {
+  if (!dirHandle) return null;
+  try {
+    const fh = await dirHandle.getFileHandle(DATA_FILE, { create: false });
+    const file = await fh.getFile();
+    return await file.text();
+  } catch (e) { return null; }
+}
+async function writeDataFile(content) {
+  if (!dirHandle) return;
+  const fh = await dirHandle.getFileHandle(DATA_FILE, { create: true });
+  const w = await fh.createWritable();
+  await w.write(content);
+  await w.close();
+}
+
+async function pickFolder() {
+  try {
+    const handle = await window.showDirectoryPicker({ mode: 'readwrite' });
+    dirHandle = handle;
+    await saveHandleToIDB(handle);
+    return true;
+  } catch (e) { return false; }
+}
+
+async function requestPermission(handle) {
+  try {
+    const perm = await handle.queryPermission({ mode: 'readwrite' });
+    if (perm === 'granted') return true;
+    if (perm === 'prompt') {
+      const res = await handle.requestPermission({ mode: 'readwrite' });
+      return res === 'granted';
+    }
+    return false;
+  } catch (e) { return false; }
+}
+
+async function loadData() {
+  const raw = await readDataFile();
+  if (raw) {
+    try { state = JSON.parse(raw); return; } catch (e) { /* seed */ }
+  }
+  state = structuredClone(SEED);
+}
+
+let state = structuredClone(SEED);
 let currentMonth = currentCalendarMonthKey();
 
 function currentCalendarMonthKey() {
@@ -591,8 +692,8 @@ function escapeHtml(str) {
 }
 
 let saveTimer = null;
-function persist() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+async function persist() {
+  try { await writeDataFile(JSON.stringify(state)); } catch (e) { /* pas de dossier autorisé */ }
   const ind = document.getElementById('save-indicator');
   ind.classList.add('show');
   clearTimeout(saveTimer);
@@ -1130,7 +1231,15 @@ function renderSettings() {
   const rates = computeRates();
   document.getElementById('computed-cot').value = pct(rates.cot);
   document.getElementById('computed-retenues').value = euro(rates.retenues);
+  document.getElementById('folder-name').textContent = dirHandle ? ('📁 ' + dirHandle.name) : 'Aucun dossier';
 }
+document.getElementById('btn-change-folder').addEventListener('click', async () => {
+  const ok = await pickFolder();
+  if (ok) {
+    await persist();
+    renderSettings();
+  }
+});
 ['set-cat1','set-cat2','set-base','set-indemnites','set-taux-pas'].forEach(id => {
   document.getElementById(id).addEventListener('input', e => {
     const map = { 'set-cat1':'primeCat1','set-cat2':'primeCat2','set-base':'salaireBase','set-indemnites':'indemnites','set-taux-pas':'tauxImposition' };
@@ -1193,7 +1302,55 @@ document.querySelectorAll('a[href^="#"]').forEach(a => {
 });
 
 /* ---------- INIT ---------- */
-renderAll();
+async function initStorageAndLoad() {
+  const setup = document.getElementById('setupScreen');
+  const banner = document.getElementById('permBanner');
+  const app = document.getElementById('app');
+
+  let handle = null;
+  try { handle = await getHandleFromIDB(); } catch (e) { /* pas de handle enregistré */ }
+
+  if (handle) {
+    try {
+      const perm = await handle.queryPermission({ mode: 'readwrite' });
+      if (perm === 'granted') {
+        dirHandle = handle;
+        await loadData();
+        app.style.display = '';
+        renderAll();
+        return;
+      }
+    } catch (e) { /* nécessite un geste utilisateur */ }
+    banner.style.display = 'flex';
+    document.getElementById('reAuthBtn').onclick = async () => {
+      const granted = await requestPermission(handle);
+      if (granted) {
+        dirHandle = handle;
+        banner.style.display = 'none';
+        await loadData();
+        app.style.display = '';
+        renderAll();
+      } else {
+        await clearHandleFromIDB();
+        banner.style.display = 'none';
+        setup.style.display = 'flex';
+      }
+    };
+    return;
+  }
+
+  setup.style.display = 'flex';
+  document.getElementById('pickFolderBtn').onclick = async () => {
+    const ok = await pickFolder();
+    if (ok) {
+      setup.style.display = 'none';
+      await loadData();
+      app.style.display = '';
+      renderAll();
+    }
+  };
+}
+initStorageAndLoad();
 </script>
 </body>
 </html>
