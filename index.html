@@ -708,14 +708,12 @@ async function pickFolder() {
 }
 
 async function requestPermission(handle) {
+  // Appelle requestPermission() directement (sans await préalable) : le navigateur exige
+  // que cet appel parte immédiatement d'un geste utilisateur (clic), sinon il refuse
+  // silencieusement — un simple queryPermission() avant suffit à casser ce lien.
   try {
-    const perm = await handle.queryPermission({ mode: 'readwrite' });
-    if (perm === 'granted') return true;
-    if (perm === 'prompt') {
-      const res = await handle.requestPermission({ mode: 'readwrite' });
-      return res === 'granted';
-    }
-    return false;
+    const res = await handle.requestPermission({ mode: 'readwrite' });
+    return res === 'granted';
   } catch (e) { return false; }
 }
 
